@@ -1,6 +1,4 @@
-@solmate=lib/solmate/src/
 @std=lib/forge-std/src/
-@clones=lib/clones-with-immutable-args/src/
-@chainlink/=lib/chainlink-brownie-contracts/
-@uniswap-periphery/=lib/v3-periphery/contracts
+@uniswap-periphery/=lib/v3-periphery/contracts/
+@permit2=lib/permit2/src/
 forge-std/=lib/forge-std/src/

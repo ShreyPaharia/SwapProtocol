@@ -1,110 +1,111 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.17;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@uniswap-periphery/interfaces/ISwapRouter.sol";
-import "@permit2/contracts/interfaces/IPermit2.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {ISignatureTransfer} from "@permit2/interfaces/ISignatureTransfer.sol";
+import {ISwapRouter} from "@uniswap-periphery/interfaces/ISwapRouter.sol";
+import "forge-std/console.sol";
 
-contract SwapProtocol is Ownable {
+contract SwapProtocol is ReentrancyGuard {
     ISwapRouter public immutable uniswapRouter;
-    IPermit2 public immutable permit2;
+    ISignatureTransfer public immutable permit2;
+    address public owner;
+    uint256 public feePercent; // feePercent is a value between 0 to 100
+    address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
-    uint256 public feePercent; // Fee is in percentage (20% by default)
-
+    // Swap intent struct
     struct SwapIntent {
         address tokenIn;
         uint256 amountIn;
         address tokenOut;
         uint256 minAmountOut;
-        bytes permit2Sig;
+        ISignatureTransfer.PermitTransferFrom permit;
+        bytes permitSig;
     }
 
-    event SwapExecuted(
-        address indexed user, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee
-    );
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
 
-    event FeeUpdated(uint256 newFeePercent);
-    event FeesWithdrawn(address token, uint256 amount);
-
-    mapping(address => uint256) public feesCollected;
-
-    constructor(address _uniswapRouter, address _permit2, uint256 _feePercent) {
-        require(_feePercent <= 100, "Fee too high");
+    constructor(address _uniswapRouter, address _permit2, uint256 _initialFeePercent) {
+        require(_initialFeePercent <= 100, "Invalid fee percent");
         uniswapRouter = ISwapRouter(_uniswapRouter);
-        permit2 = IPermit2(_permit2);
-        feePercent = _feePercent;
+        permit2 = ISignatureTransfer(_permit2);
+        owner = msg.sender;
+        feePercent = _initialFeePercent;
     }
 
-    function swap(SwapIntent calldata intent) external payable {
+    // Owner can update the fee percentage
+    function updateFeePercent(uint256 newFeePercent) external onlyOwner {
+        require(newFeePercent <= 100, "Invalid fee percent");
+        feePercent = newFeePercent;
+    }
+
+    // Withdraw collected fees by owner
+    function withdrawFees(IERC20 token) external onlyOwner {
+        uint256 balance = token.balanceOf(address(this));
+        require(balance > 0, "No fees to withdraw");
+        token.transfer(owner, balance);
+    }
+
+    // Main function to handle the swap
+    function swap(SwapIntent calldata intent) external payable nonReentrant {
+        uint256 amountIn = intent.amountIn;
+        address tokenIn;
+
         if (intent.tokenIn == address(0)) {
-            // Handle ETH case
-            require(msg.value == intent.amountIn, "Incorrect ETH sent");
+            // Handle ETH
+            require(msg.value == amountIn, "Incorrect ETH amount");
+            // Wrap ETH to WETH
+            (bool success,) = WETH.call{value: msg.value}("");
+            require(success, "Failed to wrap ETH");
+            console.log("WETH Wrapped");
+            tokenIn = WETH;
         } else {
-            // Handle ERC20 case via permit2
-            permit2.permit(msg.sender, address(this), intent.permit2Sig);
+            // Transfer tokens from user using Permit2
+            ISignatureTransfer.SignatureTransferDetails memory transferDetails =
+                ISignatureTransfer.SignatureTransferDetails({to: address(this), requestedAmount: amountIn});
 
-            IERC20(intent.tokenIn).transferFrom(msg.sender, address(this), intent.amountIn);
+            permit2.permitTransferFrom(intent.permit, transferDetails, msg.sender, intent.permitSig);
+            // Swap logic via Uniswap V3
+            tokenIn = intent.tokenIn;
         }
+        IERC20(tokenIn).approve(address(uniswapRouter), amountIn);
+        uint256 amountOut = _swapTokenToToken(tokenIn, intent.tokenOut, amountIn, intent.minAmountOut);
 
-        uint256 amountOut = _swapTokens(intent.tokenIn, intent.amountIn, intent.tokenOut, msg.sender);
-
-        require(amountOut >= intent.minAmountOut, "Insufficient output");
-
-        uint256 fee = 0;
+        // Calculate fee and transfer the remaining tokens to the user
         if (amountOut > intent.minAmountOut) {
-            fee = ((amountOut - intent.minAmountOut) * feePercent) / 100;
-            feesCollected[intent.tokenOut] += fee;
-            amountOut -= fee;
-        }
+            uint256 excessAmount = amountOut - intent.minAmountOut;
+            uint256 fee = (excessAmount * feePercent) / 100;
 
-        if (intent.tokenOut == address(0)) {
-            payable(msg.sender).transfer(amountOut);
+            IERC20 tokenOut = IERC20(intent.tokenOut);
+            tokenOut.transfer(msg.sender, amountOut - fee);
+            tokenOut.transfer(owner, fee); // Send fee to the protocol owner
         } else {
             IERC20(intent.tokenOut).transfer(msg.sender, amountOut);
         }
-
-        emit SwapExecuted(msg.sender, intent.tokenIn, intent.tokenOut, intent.amountIn, amountOut, fee);
     }
 
-    function setFeePercent(uint256 _feePercent) external onlyOwner {
-        require(_feePercent <= 100, "Fee too high");
-        feePercent = _feePercent;
-        emit FeeUpdated(_feePercent);
-    }
-
-    function withdrawFees(address token) external onlyOwner {
-        uint256 amount = feesCollected[token];
-        require(amount > 0, "No fees to withdraw");
-
-        feesCollected[token] = 0;
-
-        if (token == address(0)) {
-            payable(owner()).transfer(amount);
-        } else {
-            IERC20(token).transfer(owner(), amount);
-        }
-
-        emit FeesWithdrawn(token, amount);
-    }
-
-    function _swapTokens(address tokenIn, uint256 amountIn, address tokenOut, address to)
+    // Internal swap function from one ERC20 token to another
+    function _swapTokenToToken(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
         internal
-        returns (uint256 amountOut)
+        returns (uint256)
     {
+        // Create the swap parameters (adjust for your use case)
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: tokenIn,
             tokenOut: tokenOut,
-            fee: 3000, // Example pool fee
-            recipient: to,
-            deadline: block.timestamp,
+            fee: 3000, // 0.3% Uniswap fee tier
+            recipient: address(this),
+            deadline: block.timestamp + 120,
             amountIn: amountIn,
-            amountOutMinimum: 0,
+            amountOutMinimum: minAmountOut,
             sqrtPriceLimitX96: 0
         });
 
-        amountOut = uniswapRouter.exactInputSingle{value: tokenIn == address(0) ? amountIn : 0}(params);
+        // Execute the swap on Uniswap
+        return uniswapRouter.exactInputSingle(params);
     }
-
-    receive() external payable {}
 }

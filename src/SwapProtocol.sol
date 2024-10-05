@@ -5,7 +5,6 @@ import {IERC20} from "@openzeppelin/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/utils/ReentrancyGuard.sol";
 import {ISignatureTransfer} from "@permit2/interfaces/ISignatureTransfer.sol";
 import {ISwapRouter} from "@uniswap-periphery/interfaces/ISwapRouter.sol";
-import "forge-std/console.sol";
 
 contract SwapProtocol is ReentrancyGuard {
     ISwapRouter public immutable uniswapRouter;
@@ -61,7 +60,6 @@ contract SwapProtocol is ReentrancyGuard {
             // Wrap ETH to WETH
             (bool success,) = WETH.call{value: msg.value}("");
             require(success, "Failed to wrap ETH");
-            console.log("WETH Wrapped");
             tokenIn = WETH;
         } else {
             // Transfer tokens from user using Permit2

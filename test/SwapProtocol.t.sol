@@ -6,7 +6,6 @@ import {SwapProtocol} from "../src/SwapProtocol.sol";
 import {ISignatureTransfer} from "@permit2/interfaces/ISignatureTransfer.sol";
 import {ISwapRouter} from "@uniswap-periphery/interfaces/ISwapRouter.sol";
 import {IERC20} from "@openzeppelin/token/ERC20/IERC20.sol";
-import "forge-std/console2.sol";
 
 contract SwapProtocolTest is Test {
     ISwapRouter public constant UNISWAP_ROUTER = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
@@ -48,6 +47,8 @@ contract SwapProtocolTest is Test {
     function testSwapWithERC20() public {
         vm.startPrank(user);
 
+        uint256 startWETHBalance = WETH.balanceOf(user);
+
         USDC.approve(address(PERMIT2), type(uint256).max);
 
         uint256 amountIn = 1000 * 1e6; // 1000 USDC
@@ -76,14 +77,16 @@ contract SwapProtocolTest is Test {
         swapProtocol.swap(intent);
 
         // Verify the swap results
-        uint256 userWETHBalance = WETH.balanceOf(user);
-        assert(userWETHBalance > minAmountOut);
+        uint256 endWETHBalance = WETH.balanceOf(user);
+        assert(endWETHBalance - startWETHBalance >= minAmountOut);
 
         vm.stopPrank();
     }
 
     function testSwapWithETH() public {
         vm.startPrank(user);
+
+        uint256 startUSDCBalance = USDC.balanceOf(user);
 
         uint256 amountIn = 1 * 1e18; // 1 ETH
         uint256 minAmountOut = 1000 * 1e6; // Minimum 1000 USDC expected out
@@ -109,8 +112,8 @@ contract SwapProtocolTest is Test {
         swapProtocol.swap{value: amountIn}(intent);
 
         // Verify the swap results
-        uint256 userUSDCBalance = USDC.balanceOf(user);
-        assert(userUSDCBalance > minAmountOut);
+        uint256 endUSDCBalance = USDC.balanceOf(user);
+        assert(endUSDCBalance - startUSDCBalance >= minAmountOut);
 
         vm.stopPrank();
     }

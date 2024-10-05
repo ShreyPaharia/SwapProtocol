@@ -29,6 +29,7 @@ contract SwapProtocolTest is Test {
     function setUp() public {
         // Fork the Ethereum mainnet
         vm.createSelectFork("https://eth-mainnet.g.alchemy.com/v2/-vgQHEEyUqPHMIT3pnMzzE_8xNelx7sj");
+        vm.rollFork(20900000);
 
         // Deploy the SwapProtocol contract
         owner = address(this);
@@ -38,6 +39,9 @@ contract SwapProtocolTest is Test {
         // Create a user account for testing
         userPrivateKey = 0x59c6995e998f97a5a0044974f9e79dfb2b63c22e5a7bdef7c12e7c287b52db1b; // Replace with your test private key
         user = vm.addr(userPrivateKey);
+
+        swapProtocol.approveRouter(USDC);
+        swapProtocol.approveRouter(WETH);
 
         // Give user some USDC and ETH for testing
         deal(address(USDC), user, 1_000_000 * 1e6); // 1 million USDC

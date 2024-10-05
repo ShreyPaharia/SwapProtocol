@@ -3,7 +3,9 @@
     "solc_remaps": [
       "ds-test/=lib/ds-test/src/",
       "forge-std/=lib/forge-std/src/",
-      "@chainlink/=lib/chainlink-brownie-contracts/"
+      "@openzeppelin/=lib/openzeppelin-contracts/contracts",
+      "@uniswap-periphery/=lib/v3-periphery/contracts/",
+      "@permit2=lib/permit2/src/"
     ]
   }
   

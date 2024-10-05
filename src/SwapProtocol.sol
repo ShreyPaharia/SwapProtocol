@@ -9,7 +9,7 @@ import {ISwapRouter} from "@uniswap-periphery/interfaces/ISwapRouter.sol";
 contract SwapProtocol is ReentrancyGuard {
     ISwapRouter public immutable uniswapRouter;
     ISignatureTransfer public immutable permit2;
-    address public owner;
+    address public immutable owner;
     uint256 public feePercent; // feePercent is a value between 0 to 100
     address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
@@ -57,29 +57,33 @@ contract SwapProtocol is ReentrancyGuard {
         token.transfer(owner, balance);
     }
 
+    function approveRouter(IERC20 token) external onlyOwner {
+        token.approve(address(uniswapRouter), type(uint256).max);
+    }
+
     // Main function to handle the swap
     function swap(SwapIntent calldata intent) external payable nonReentrant {
         uint256 amountIn = intent.amountIn;
-        address tokenIn = intent.tokenIn == address(0) ? WETH : intent.tokenIn; // Check for ETH and set tokenIn accordingly
+        address tokenIn; // Check for ETH and set tokenIn accordingly
 
-        if (tokenIn == WETH) {
+        if (intent.tokenIn == address(0)) {
             if (msg.value != amountIn) revert IncorrectETHAmount(msg.value, amountIn);
             (bool success,) = WETH.call{value: msg.value}("");
             if (!success) revert TransferFailed();
+            tokenIn = WETH;
         } else {
-            // Transfer tokens from user using Permit2
-            ISignatureTransfer.SignatureTransferDetails memory transferDetails =
-                ISignatureTransfer.SignatureTransferDetails({to: address(this), requestedAmount: amountIn});
-            permit2.permitTransferFrom(intent.permit, transferDetails, msg.sender, intent.permitSig);
+            permit2.permitTransferFrom(
+                intent.permit,
+                ISignatureTransfer.SignatureTransferDetails({to: address(this), requestedAmount: amountIn}),
+                msg.sender,
+                intent.permitSig
+            );
+            tokenIn = intent.tokenIn;
         }
 
-        IERC20(tokenIn).approve(address(uniswapRouter), amountIn); // Avoid redundant approval by checking before
         uint256 amountOut = _swapTokenToToken(tokenIn, intent.tokenOut, amountIn, intent.minAmountOut);
 
         uint256 fee = (amountOut > intent.minAmountOut) ? (amountOut - intent.minAmountOut) * feePercent / 100 : 0;
-
-        // Check for sufficient output amount after fee deduction
-        if (amountOut < fee) revert InsufficientOutputAmount(amountOut, fee);
 
         IERC20(intent.tokenOut).transfer(msg.sender, amountOut - fee); // Send the remaining tokens to the user
     }

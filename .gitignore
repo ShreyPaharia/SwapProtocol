@@ -5,6 +5,7 @@ out/
 .env
 .encryptedKey
 broadcast/
+slither/
 
 node_modules
 package-lock.json

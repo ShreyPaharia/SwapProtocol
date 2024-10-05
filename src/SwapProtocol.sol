@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import "@uniswap-periphery/interfaces/ISwapRouter.sol";
 import "@permit2/contracts/interfaces/IPermit2.sol";
 
 contract SwapProtocol is Ownable {

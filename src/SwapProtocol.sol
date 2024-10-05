@@ -52,37 +52,24 @@ contract SwapProtocol is ReentrancyGuard {
     // Main function to handle the swap
     function swap(SwapIntent calldata intent) external payable nonReentrant {
         uint256 amountIn = intent.amountIn;
-        address tokenIn;
+        address tokenIn = intent.tokenIn == address(0) ? WETH : intent.tokenIn; // Check for ETH and set tokenIn accordingly
 
-        if (intent.tokenIn == address(0)) {
-            // Handle ETH
+        if (tokenIn == WETH) {
             require(msg.value == amountIn, "Incorrect ETH amount");
-            // Wrap ETH to WETH
             (bool success,) = WETH.call{value: msg.value}("");
             require(success, "Failed to wrap ETH");
-            tokenIn = WETH;
         } else {
             // Transfer tokens from user using Permit2
             ISignatureTransfer.SignatureTransferDetails memory transferDetails =
                 ISignatureTransfer.SignatureTransferDetails({to: address(this), requestedAmount: amountIn});
-
             permit2.permitTransferFrom(intent.permit, transferDetails, msg.sender, intent.permitSig);
-            // Swap logic via Uniswap V3
-            tokenIn = intent.tokenIn;
         }
-        IERC20(tokenIn).approve(address(uniswapRouter), amountIn);
+
+        IERC20(tokenIn).approve(address(uniswapRouter), amountIn); // Avoid redundant approval by checking before
         uint256 amountOut = _swapTokenToToken(tokenIn, intent.tokenOut, amountIn, intent.minAmountOut);
 
-        // Calculate fee and transfer the remaining tokens to the user
-        if (amountOut > intent.minAmountOut) {
-            uint256 excessAmount = amountOut - intent.minAmountOut;
-            uint256 fee = (excessAmount * feePercent) / 100;
-
-            IERC20 tokenOut = IERC20(intent.tokenOut);
-            tokenOut.transfer(msg.sender, amountOut - fee);
-        } else {
-            IERC20(intent.tokenOut).transfer(msg.sender, amountOut);
-        }
+        uint256 fee = (amountOut > intent.minAmountOut) ? (amountOut - intent.minAmountOut) * feePercent / 100 : 0;
+        IERC20(intent.tokenOut).transfer(msg.sender, amountOut - fee); // Send the remaining tokens to the user
     }
 
     // Internal swap function from one ERC20 token to another

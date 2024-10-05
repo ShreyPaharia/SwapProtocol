@@ -5,10 +5,12 @@ import {Test} from "forge-std/Test.sol";
 import {SwapProtocol} from "../src/SwapProtocol.sol";
 import {ISignatureTransfer} from "@permit2/interfaces/ISignatureTransfer.sol";
 import {ISwapRouter} from "@uniswap-periphery/interfaces/ISwapRouter.sol";
+import {IQuoterV2} from "@uniswap-periphery/interfaces/IQuoterV2.sol";
 import {IERC20} from "@openzeppelin/token/ERC20/IERC20.sol";
 
 contract SwapProtocolTest is Test {
     ISwapRouter public constant UNISWAP_ROUTER = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+    IQuoterV2 public constant QUOTER = IQuoterV2(0x61fFE014bA17989E743c5F6cB21bF9697530B21e);
     ISignatureTransfer public constant PERMIT2 = ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
     IERC20 public constant USDC = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
     IERC20 public constant WETH = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
@@ -30,9 +32,7 @@ contract SwapProtocolTest is Test {
 
         // Deploy the SwapProtocol contract
         owner = address(this);
-
         swapProtocol = new SwapProtocol(address(UNISWAP_ROUTER), address(PERMIT2), 20); // 20% fee initially
-
         DOMAIN_SEPARATOR = PERMIT2.DOMAIN_SEPARATOR();
 
         // Create a user account for testing
@@ -41,13 +41,15 @@ contract SwapProtocolTest is Test {
 
         // Give user some USDC and ETH for testing
         deal(address(USDC), user, 1_000_000 * 1e6); // 1 million USDC
-        deal(user, 100 * 1e18); //100 ETH
+        deal(user, 100 * 1e18); // 100 ETH
     }
 
     function testSwapWithERC20() public {
         vm.startPrank(user);
 
         uint256 startWETHBalance = WETH.balanceOf(user);
+        uint256 startSwapProtocolBalance = WETH.balanceOf(address(swapProtocol));
+        uint256 startUSDCBalance = USDC.balanceOf(user);
 
         USDC.approve(address(PERMIT2), type(uint256).max);
 
@@ -73,12 +75,29 @@ contract SwapProtocolTest is Test {
             permitSig: signature
         });
 
+        IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
+            tokenIn: address(USDC),
+            tokenOut: address(WETH),
+            amountIn: amountIn,
+            fee: 3000, // Uniswap fee tier (0.3%)
+            sqrtPriceLimitX96: 0
+        });
+        // Use QuoterV2 to get the expected amountOut
+        (uint256 expectedAmountOut,,,) = QUOTER.quoteExactInputSingle(quoteParams);
+
         // Execute swap
         swapProtocol.swap(intent);
 
-        // Verify the swap results
+        // Verify balance changes
         uint256 endWETHBalance = WETH.balanceOf(user);
-        assert(endWETHBalance - startWETHBalance >= minAmountOut);
+        uint256 endSwapProtocolBalance = WETH.balanceOf(address(swapProtocol));
+        uint256 endUSDCBalance = USDC.balanceOf(user);
+
+        uint256 expectedFee = ((expectedAmountOut - minAmountOut) * 20) / 100;
+
+        assertEq(endUSDCBalance, startUSDCBalance - amountIn, "Incorrect USDC balance");
+        assertEq(endWETHBalance, startWETHBalance + expectedAmountOut - expectedFee, "Incorrect WETH balance");
+        assertEq(endSwapProtocolBalance, startSwapProtocolBalance + expectedFee, "Incorrect SwapProtocol balance");
 
         vm.stopPrank();
     }
@@ -87,6 +106,8 @@ contract SwapProtocolTest is Test {
         vm.startPrank(user);
 
         uint256 startUSDCBalance = USDC.balanceOf(user);
+        uint256 startETHBalance = user.balance;
+        uint256 startSwapProtocolBalance = USDC.balanceOf(address(swapProtocol));
 
         uint256 amountIn = 1 * 1e18; // 1 ETH
         uint256 minAmountOut = 1000 * 1e6; // Minimum 1000 USDC expected out
@@ -108,12 +129,29 @@ contract SwapProtocolTest is Test {
             permitSig: ""
         });
 
+        IQuoterV2.QuoteExactInputSingleParams memory quoteParams = IQuoterV2.QuoteExactInputSingleParams({
+            tokenIn: address(WETH),
+            tokenOut: address(USDC),
+            amountIn: amountIn,
+            fee: 3000, // Uniswap fee tier (0.3%)
+            sqrtPriceLimitX96: 0
+        });
+        // Use QuoterV2 to get the expected amountOut
+        (uint256 expectedAmountOut,,,) = QUOTER.quoteExactInputSingle(quoteParams);
+
         // Execute swap
         swapProtocol.swap{value: amountIn}(intent);
 
         // Verify the swap results
         uint256 endUSDCBalance = USDC.balanceOf(user);
-        assert(endUSDCBalance - startUSDCBalance >= minAmountOut);
+        uint256 endETHBalance = user.balance;
+        uint256 endSwapProtocolBalance = USDC.balanceOf(address(swapProtocol));
+
+        uint256 expectedFee = ((expectedAmountOut - minAmountOut) * 20) / 100;
+
+        assertEq(endETHBalance, startETHBalance - amountIn, "Incorrect ETH balance");
+        assertEq(endUSDCBalance, startUSDCBalance + expectedAmountOut - expectedFee, "Incorrect USDC balance");
+        assertEq(endSwapProtocolBalance, startSwapProtocolBalance + expectedFee, "Incorrect SwapProtocol balance");
 
         vm.stopPrank();
     }

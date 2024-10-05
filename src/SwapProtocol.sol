@@ -80,7 +80,6 @@ contract SwapProtocol is ReentrancyGuard {
 
             IERC20 tokenOut = IERC20(intent.tokenOut);
             tokenOut.transfer(msg.sender, amountOut - fee);
-            tokenOut.transfer(owner, fee); // Send fee to the protocol owner
         } else {
             IERC20(intent.tokenOut).transfer(msg.sender, amountOut);
         }

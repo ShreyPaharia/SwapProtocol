@@ -13,6 +13,14 @@ contract SwapProtocol is ReentrancyGuard {
     uint256 public feePercent; // feePercent is a value between 0 to 100
     address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
+    // Custom Errors
+    error NotOwner();
+    error InvalidFeePercent(uint256 feePercent);
+    error NoFeesToWithdraw();
+    error IncorrectETHAmount(uint256 provided, uint256 expected);
+    error TransferFailed();
+    error InsufficientOutputAmount(uint256 actual, uint256 minimum);
+
     // Swap intent struct
     struct SwapIntent {
         address tokenIn;
@@ -24,12 +32,12 @@ contract SwapProtocol is ReentrancyGuard {
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
+        if (msg.sender != owner) revert NotOwner();
         _;
     }
 
     constructor(address _uniswapRouter, address _permit2, uint256 _initialFeePercent) {
-        require(_initialFeePercent <= 100, "Invalid fee percent");
+        if (_initialFeePercent > 100) revert InvalidFeePercent(_initialFeePercent);
         uniswapRouter = ISwapRouter(_uniswapRouter);
         permit2 = ISignatureTransfer(_permit2);
         owner = msg.sender;
@@ -38,14 +46,14 @@ contract SwapProtocol is ReentrancyGuard {
 
     // Owner can update the fee percentage
     function updateFeePercent(uint256 newFeePercent) external onlyOwner {
-        require(newFeePercent <= 100, "Invalid fee percent");
+        if (newFeePercent > 100) revert InvalidFeePercent(newFeePercent);
         feePercent = newFeePercent;
     }
 
     // Withdraw collected fees by owner
     function withdrawFees(IERC20 token) external onlyOwner {
         uint256 balance = token.balanceOf(address(this));
-        require(balance > 0, "No fees to withdraw");
+        if (balance == 0) revert NoFeesToWithdraw();
         token.transfer(owner, balance);
     }
 
@@ -55,9 +63,9 @@ contract SwapProtocol is ReentrancyGuard {
         address tokenIn = intent.tokenIn == address(0) ? WETH : intent.tokenIn; // Check for ETH and set tokenIn accordingly
 
         if (tokenIn == WETH) {
-            require(msg.value == amountIn, "Incorrect ETH amount");
+            if (msg.value != amountIn) revert IncorrectETHAmount(msg.value, amountIn);
             (bool success,) = WETH.call{value: msg.value}("");
-            require(success, "Failed to wrap ETH");
+            if (!success) revert TransferFailed();
         } else {
             // Transfer tokens from user using Permit2
             ISignatureTransfer.SignatureTransferDetails memory transferDetails =
@@ -69,6 +77,10 @@ contract SwapProtocol is ReentrancyGuard {
         uint256 amountOut = _swapTokenToToken(tokenIn, intent.tokenOut, amountIn, intent.minAmountOut);
 
         uint256 fee = (amountOut > intent.minAmountOut) ? (amountOut - intent.minAmountOut) * feePercent / 100 : 0;
+
+        // Check for sufficient output amount after fee deduction
+        if (amountOut < fee) revert InsufficientOutputAmount(amountOut, fee);
+
         IERC20(intent.tokenOut).transfer(msg.sender, amountOut - fee); // Send the remaining tokens to the user
     }
 

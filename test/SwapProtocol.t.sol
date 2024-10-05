@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {SwapProtocol} from "../src/SwapProtocol.sol";
 import {ISignatureTransfer} from "@permit2/interfaces/ISignatureTransfer.sol";
 import {ISwapRouter} from "@uniswap-periphery/interfaces/ISwapRouter.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/token/ERC20/IERC20.sol";
 import "forge-std/console2.sol";
 
 contract SwapProtocolTest is Test {
@@ -120,7 +120,7 @@ contract SwapProtocolTest is Test {
         uint256 privateKey,
         address spender,
         ISignatureTransfer.PermitTransferFrom memory permit
-    ) internal returns (bytes memory) {
+    ) internal view returns (bytes memory) {
         bytes32 tokenPermissions = keccak256(abi.encode(_TOKEN_PERMISSIONS_TYPEHASH, permit.permitted));
         bytes32 msgHash = keccak256(
             abi.encodePacked(

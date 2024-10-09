@@ -55,3 +55,25 @@ The `SwapProtocolTest` contract includes Foundry tests to verify the functionali
 ## Conclusion
 
 This project provides a secure, gas-optimized, and readable solution for a minimal swapping protocol using Uniswap and Permit2. The protocol includes functionality for fee adjustments and fee withdrawals, ensuring flexibility and usability for the protocol owner.
+
+## How to run
+
+To run the project, follow these steps:
+
+1. **Install Dependencies**: Run the following command to install all dependencies:
+
+```sh
+forge install
+```
+
+2. **Install Uniswap Dependencies**: Navigate to the Uniswap V3 Periphery library and install its dependencies:
+
+```sh
+cd lib/v3-periphery && yarn install && cd ../..
+```
+
+3. **Run Tests**: Execute the Foundry tests to ensure everything is working correctly:
+
+```sh
+forge test --via-ir
+```
